@@ -25,41 +25,37 @@ export function formatMath(text) {
     }
   );
 
-  // 1. Render display math $$ ... $$
-  result = result.replace(/\$\$([^$]+)\$\$/g, (match, formula) => {
+  // Lindungi seluruh output HTML/SVG KaTeX agar tidak rusak oleh konversi markdown (*, **) dan newline (\n -> <br />)
+  // (KaTeX menggunakan newline di dalam atribut <path d="..."> pada simbol akar \sqrt, dll.)
+  const protectedMathBlocks = [];
+  const stashKatex = (formula, displayMode, fallback) => {
     try {
-      return katex.renderToString(formula.trim(), {
-        displayMode: true,
+      const rendered = katex.renderToString(formula.trim(), {
+        displayMode,
         throwOnError: false,
       });
+      const token = `__KATEX_BLOCK_TOKEN_${protectedMathBlocks.length}__`;
+      protectedMathBlocks.push(rendered);
+      return token;
     } catch {
-      return match;
+      return fallback;
     }
-  });
+  };
+
+  // 1. Render display math $$ ... $$
+  result = result.replace(/\$\$([^$]+)\$\$/g, (match, formula) =>
+    stashKatex(formula, true, match)
+  );
 
   // 2. Render inline math $ ... $
-  result = result.replace(/\$([^$\n]+)\$/g, (match, formula) => {
-    try {
-      return katex.renderToString(formula.trim(), {
-        displayMode: false,
-        throwOnError: false,
-      });
-    } catch {
-      return match;
-    }
-  });
+  result = result.replace(/\$([^$\n]+)\$/g, (match, formula) =>
+    stashKatex(formula, false, match)
+  );
 
   // 3. Tangani kasus pecahan LaTeX mentah tanpa tanda dollar ($) misalnya \frac{1}{2} atau 3\frac{1}{2}
-  result = result.replace(/(\d*\\frac\{[^{}]+\}\{[^{}]+\})/g, (match, formula) => {
-    try {
-      return katex.renderToString(formula.trim(), {
-        displayMode: false,
-        throwOnError: false,
-      });
-    } catch {
-      return match;
-    }
-  });
+  result = result.replace(/(\d*\\frac\{[^{}]+\}\{[^{}]+\})/g, (match, formula) =>
+    stashKatex(formula, false, match)
+  );
 
   // 4. Konversi format markdown bold **teks** menjadi <strong>teks</strong>
   result = result.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
@@ -70,7 +66,10 @@ export function formatMath(text) {
   // 6. Konversi newline \n menjadi <br /> agar baris baru sesuai dengan ketikan di Admin Panel
   result = result.replace(/\n/g, '<br />');
 
-  // Kembalikan seluruh tag HTML (<img>, <span>, <div>, dll.) secara utuh
+  // Kembalikan seluruh hasil render KaTeX & tag HTML (<img>, <span>, <div>, dll.) secara utuh
+  result = result.replace(/__KATEX_BLOCK_TOKEN_(\d+)__/g, (_, idx) => {
+    return protectedMathBlocks[Number(idx)] ?? '';
+  });
   result = result.replace(/__HTML_TAG_TOKEN_(\d+)__/g, (_, idx) => {
     return protectedHtmlTags[Number(idx)] ?? '';
   });
